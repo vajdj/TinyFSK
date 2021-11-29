@@ -824,10 +824,9 @@ void setPTT(byte b)
     digitalWrite(PTT_PIN, HIGH);
     // we will stay in the mark state for some amount of time
     // before sending the first start bit of the first character
-    //delay(pttLeadMillis);
     ptt = true;
-    Timer1.start();
     pttDelay = pttLeadClocks;
+    Timer1.start();
   }
   else if (!b)
   {  // PTT OFF
