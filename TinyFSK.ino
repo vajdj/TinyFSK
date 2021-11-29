@@ -37,7 +37,7 @@ Revisions:
 #include "TimerOne.h"
 #include "EEPROM.h"
 
-#define VERSION "1.1.0"
+#define VERSION "1.1.1a"
 
 //Arduino pins for PTT and FSK to control transmitter
 #define FSK_PIN 11
@@ -282,8 +282,9 @@ user commands or during normal TX operation.
 float baudrate = 45.45;  //default--can be changed by user command
 
 int pttLeadMillis = 150; //time before first start bit
+long pttLeadClocks;
 int pttTailMillis = 25;  //time after last stop bit
-
+long pttDelay = 0;
 
 // Polarity--changed with user commands and stored in EEPROM
 boolean mark = LOW;     //High indicates +V on the FSK pin
@@ -291,7 +292,7 @@ boolean space = HIGH;   //Low indicates 0V on the FSK pin
 
 // Buffer management variables to handle TX text input
 byte sendBufferArray[SEND_BUFFER_SIZE];  // size of TX buffer
-byte sendBufferBytes = 0;    // number of bytes unsent in TX buffer
+int sendBufferBytes = 0;    // number of bytes unsent in TX buffer
 byte lastAsciiByteSent = 0;  // needed to echo back sent characters to terminal
 boolean endWhenBufferEmpty = true;  //flag to kill TX when buffer empty (']')
 
@@ -511,8 +512,14 @@ void initTimer()
 {
   Timer1.stop(); 
   long bitPeriod = (long) ((1.0f/baudrate) * 1000000); //micros
-  Timer1.initialize(bitPeriod/2.0);         
-  Timer1.attachInterrupt(timerISR);    
+  bitPeriod /= 2;
+  Timer1.initialize(bitPeriod);         
+  Timer1.attachInterrupt(timerISR);
+  Timer1.stop();
+  pttDelay = 0;
+  pttLeadClocks  = (long)pttLeadMillis * 1000;
+  pttLeadClocks += bitPeriod - 1;
+  pttLeadClocks /= bitPeriod;
 }
 
 /**
@@ -585,6 +592,11 @@ void processHalfBit() {
 
   if (!ptt)  //not transmitting, so just return--there's nothing to send.
   {
+    return;
+  }
+
+  if (pttDelay) {
+    pttDelay--;
     return;
   }
   
@@ -806,15 +818,18 @@ boolean requiresFigures(byte asciiByte)
 void setPTT(byte b) 
 {
   
-  if (b)
+  if (b && !ptt)
   {  // PTT ON
     digitalWrite(FSK_PIN, mark);  //always start in mark state
     digitalWrite(PTT_PIN, HIGH);
     // we will stay in the mark state for some amount of time
     // before sending the first start bit of the first character
-    delay(pttLeadMillis);
+    //delay(pttLeadMillis);
+    ptt = true;
+    Timer1.start();
+    pttDelay = pttLeadClocks;
   }
-  else 
+  else if (!b)
   {  // PTT OFF
     digitalWrite(PTT_PIN, LOW); // drop PTT
     digitalWrite(FSK_PIN, space); 
@@ -825,8 +840,10 @@ void setPTT(byte b)
 
     lastAsciiByteSent = 0;
     Serial.write("\ncmd:\n"); // Tells N1MM that TX is finished
+    ptt = false;
+    Timer1.stop();
+    pttDelay = 0;
   }
-   ptt = b;
 }
 
 /**
